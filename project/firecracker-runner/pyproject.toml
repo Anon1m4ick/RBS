@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oblak-firecracker-runner"
+version = "0.1.0"
+description = "Firecracker execution stage for the Oblak serverless platform"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+oblak-firecracker-run = "oblak.firecracker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["oblak*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
