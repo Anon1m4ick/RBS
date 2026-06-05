@@ -1,6 +1,6 @@
 # Oblak Code Verifier
 
-Security verification library for the Oblak serverless platform. Analyzes uploaded Python code for safety using static analysis (Bandit) and LLM review (Google Gemini).
+Security verification library for the Oblak serverless platform. Analyzes uploaded Python code for safety using static analysis (Bandit), LLM review (Google Gemini), and ClamAV antivirus scanning.
 
 ## Installation
 
@@ -10,6 +10,9 @@ pip install -e ".[dev]"
 ```
 
 This installs the `verifier` package and the `bandit` CLI on your PATH.
+
+**ClamAV** (`clamscan`) must be installed separately on the host and virus definitions
+updated via `freshclam` (see [ClamAV docs](https://docs.clamav.net/)).
 
 ## Environment Variables
 
@@ -34,7 +37,7 @@ else:
 
 1. **Bandit** — static analysis; blocks MEDIUM and HIGH severity issues
 2. **LLM** — Gemini 2.5 Flash reviews code for malicious patterns via the Google Generative Language API
-3. **Antivirus** — stub (always passes; ClamAV wiring left as TODO)
+3. **Antivirus** — ClamAV (`clamscan` subprocess); blocks files with known malware signatures
 
 After each `verify()` call, an audit line is appended to `oblak-verifier.log` in the current working directory.
 
@@ -45,7 +48,7 @@ cd code-verifier
 pytest
 ```
 
-Tests that require Bandit will be skipped automatically if the `bandit` binary is not on PATH.
+Tests that require Bandit or ClamAV are skipped automatically when the corresponding binary is not on PATH.
 
 ## Assumptions
 
@@ -53,6 +56,6 @@ Tests that require Bandit will be skipped automatically if the `bandit` binary i
 - **Bandit** is invoked as a subprocess (`bandit` on PATH); uploaded code is never executed.
 - **LLM** calls `gemini-2.5-flash` via `requests` (no Gemini SDK); endpoint is `generativelanguage.googleapis.com/v1beta`.
 - **Missing `GEMINI_API_KEY`** causes the LLM check to fail closed with an error result.
-- **Antivirus** is a no-op stub; production wiring would call `clamscan`/`clamdscan` via subprocess.
+- **Antivirus** invokes `clamscan` as a subprocess; exit code 1 means infection found, 2 means scan error. If `clamscan` is missing, the check fails closed.
 - **Audit log** is written to `oblak-verifier.log` in the process working directory (not configurable).
 - **Server integration**: the API server imports `verify` and returns HTTP 400 with `result["reason"]` on failure.
