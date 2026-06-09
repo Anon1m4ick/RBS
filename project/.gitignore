@@ -13,6 +13,7 @@ htmlcov/
 
 # Logs
 oblak-verifier.log
+.oblak/
 
 # IDE
 .idea/
