@@ -1,0 +1,74 @@
+services:
+  cloud-server:
+    build:
+      context: .
+      dockerfile: cloud-server/Dockerfile
+    env_file:
+      - ./cloud-server/.env
+    environment:
+      OBLAK_DATABASE_PATH: /data/oblak_cloud.sqlite3
+      OBLAK_AUDIT_LOG_PATH: /data/oblak-cloud-audit.log
+      OBLAK_PUBLIC_BASE_URL: http://localhost:8000
+      OBLAK_BOOTSTRAP_USERNAME: alice
+      OBLAK_BOOTSTRAP_TOKEN: dev-token
+      OBLAK_RUN_FRESHCLAM_ON_STARTUP: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - cloud-data:/data
+      - clamav-db:/var/lib/clamav
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  cdk:
+    build:
+      context: .
+      dockerfile: cdk-cli/Dockerfile
+    environment:
+      OBLAK_SERVER_URL: http://cloud-server:8000
+    volumes:
+      - cdk-home:/root/.cdk
+      - ./cloud-server/examples:/workspace/examples:ro
+    depends_on:
+      cloud-server:
+        condition: service_healthy
+    profiles:
+      - tools
+
+  code-verifier:
+    build:
+      context: .
+      dockerfile: code-verifier/Dockerfile
+    env_file:
+      - ./cloud-server/.env
+    volumes:
+      - clamav-db:/var/lib/clamav
+      - ./code-verifier/tests/samples:/samples:ro
+    profiles:
+      - tools
+
+  firecracker-runner:
+    build:
+      context: .
+      dockerfile: firecracker-runner/Dockerfile
+    volumes:
+      - ./firecracker-runner/examples:/workspace/examples:ro
+      - firecracker-work:/workspace/.oblak
+    profiles:
+      - tools
+
+volumes:
+  cloud-data:
+  clamav-db:
+  cdk-home:
+  firecracker-work:

@@ -33,6 +33,31 @@ Do not include any text outside the JSON object.\
 """
 
 
+def _parse_llm_json(raw_text: str) -> dict | None:
+    text = raw_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
+    return parsed if isinstance(parsed, dict) else None
+
+
 def run_llm(file_path: Path) -> VerificationResult:
     """Run LLM-based security analysis via the Google Gemini API."""
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -70,20 +95,12 @@ def run_llm(file_path: Path) -> VerificationResult:
             reason=f"LLM API call failed: {exc}",
         )
 
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
+    parsed = _parse_llm_json(raw_text)
+    if parsed is None or "safe" not in parsed:
         return VerificationResult(
             ok=False,
             failed_check="llm",
-            reason="could not parse LLM response — treating as unsafe",
-        )
-
-    if not isinstance(parsed, dict) or "safe" not in parsed:
-        return VerificationResult(
-            ok=False,
-            failed_check="llm",
-            reason="could not parse LLM response — treating as unsafe",
+            reason="could not parse LLM response - treating as unsafe",
         )
 
     if parsed["safe"] is True:

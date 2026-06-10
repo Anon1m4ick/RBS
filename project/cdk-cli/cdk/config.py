@@ -14,7 +14,7 @@ def save_token(token: str) -> None:
     """Persist the API token with restrictive file permissions."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     os.chmod(CONFIG_DIR, 0o700)
-    CONFIG_FILE.write_text(json.dumps({"token": token}), encoding="utf-8")
+    CONFIG_FILE.write_text(json.dumps({"token": token.strip()}), encoding="utf-8")
     os.chmod(CONFIG_FILE, 0o600)
 
 
@@ -26,4 +26,7 @@ def load_token() -> str | None:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
-    return data.get("token")
+    token = data.get("token")
+    if not isinstance(token, str):
+        return None
+    return token.strip()
