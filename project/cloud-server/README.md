@@ -110,3 +110,102 @@ pytest
 ```
 
 The API tests mock the verifier so they do not call Gemini, Bandit, or ClamAV.
+
+## Docker Workflow
+
+From `project/`, create a local ignored environment file:
+
+```powershell
+Copy-Item cloud-server\env.example cloud-server\.env
+notepad cloud-server\.env
+```
+
+Set `GEMINI_API_KEY` in `cloud-server\.env`. The default Docker auth user is:
+
+```text
+username: alice
+token: dev-token
+```
+
+Build and start the API server:
+
+```powershell
+cd C:\RazvojBezbednogSoftvera\RBS\project
+docker compose --profile tools build
+docker compose up -d cloud-server
+docker compose ps
+```
+
+Check health:
+
+```powershell
+Invoke-RestMethod http://localhost:8000/health
+```
+
+Authenticate the containerized CDK CLI:
+
+```powershell
+"dev-token" | docker compose run --rm -T cdk login
+```
+
+Deploy the benign function:
+
+```powershell
+docker compose run --rm -T cdk deploy /workspace/examples/benign/handler.py
+```
+
+List deployed functions:
+
+```powershell
+docker compose run --rm -T cdk list
+```
+
+Verify a malicious upload is rejected:
+
+```powershell
+docker compose run --rm -T cdk deploy /workspace/examples/malicious/handler.py
+```
+
+The malicious command should exit non-zero with a verification error.
+
+Run the standardized PowerShell e2e workflow:
+
+```powershell
+.\scripts\e2e.ps1
+```
+
+The script resets Compose volumes by default. Use `.\scripts\e2e.ps1 -KeepState` to reuse the current Docker state.
+
+Run API unit tests inside the Cloud server image:
+
+```powershell
+docker compose run --rm --entrypoint python cloud-server -m pytest
+```
+
+Run the verifier package tests inside its own container:
+
+```powershell
+docker compose run --rm code-verifier
+```
+
+Run the Firecracker stage in containerized dry-run mode:
+
+```powershell
+docker compose run --rm firecracker-runner `
+  --bundle /workspace/examples/hello `
+  --event-file /workspace/examples/hello/event.json `
+  --function-id hello `
+  --dry-run
+```
+
+Stop the application:
+
+```powershell
+docker compose down
+```
+
+Reset all Docker volumes, including SQLite data, CDK auth config, ClamAV DB, and Firecracker dry-run output:
+
+```powershell
+docker compose down -v
+```

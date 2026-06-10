@@ -14,7 +14,7 @@ console = Console()
 
 def login() -> None:
     """Prompt for an API token and validate it against the server."""
-    token = click.prompt("API token", hide_input=True)
+    token = click.prompt("API token", hide_input=True).strip()
 
     try:
         response = requests.get(
