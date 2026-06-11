@@ -13,13 +13,15 @@
 - Keep the Gemini API key outside source control in `GEMINI_API_KEY`.
 - Record authentication failures, upload events, verification outcomes, deletion, and invoke attempts in an audit trail.
 - Preserve a JSONL audit hash chain so deleted or reordered records are detectable.
-- Do not execute uploaded code in this server.
+- Execute uploaded code only through the configured Firecracker runner backend; keep runtime disabled otherwise.
 
 ## Execution Boundary
 
-This server does not run user code. The returned `/run/{function_id}` URL records an invoke attempt and returns `501`.
+By default this server does not run user code. The returned `/run/{function_id}` URL records an invoke attempt and returns `501` unless `OBLAK_RUNTIME_BACKEND=firecracker` is configured.
 
-The separate Firecracker runner must provide the actual execution boundary:
+When Firecracker runtime is enabled, the server loads the verified code blob from SQLite, prepares a temporary function bundle, and delegates execution to the Firecracker runner stage. The handler must still run inside the microVM boundary; the API process must not import or execute user code directly.
+
+The Firecracker runner must provide the actual execution boundary:
 
 - one function invocation per microVM or otherwise isolated execution context;
 - no host directory mounts inside the guest;
@@ -41,7 +43,7 @@ The separate Firecracker runner must provide the actual execution boundary:
 | Tampering | Code changed after verification | Code and requirements are stored as blobs with SHA-256 hashes and audit records | Sign verified bundles before passing to Firecracker |
 | Repudiation | User denies upload/delete/invoke attempt | SQLite audit rows and JSONL hash chain include actor, request ID, IP, event type, and outcome | Central append-only log storage |
 | Information Disclosure | API token leakage through logs | Tokens are never logged and only hashes are stored | Secret scanning in CI |
-| Information Disclosure | Uploaded code reads host secrets | This server does not execute code | Firecracker isolation must block host mounts and run as non-root |
+| Information Disclosure | Uploaded code reads host secrets | Runtime is disabled by default; enabled runtime delegates to Firecracker | Firecracker isolation must block host mounts and run as non-root |
 | Denial of Service | Large uploads exhaust memory or disk | Server enforces byte limits for code and requirements | Per-user rate limits and quotas |
 | Denial of Service | Slow scanner or LLM call blocks workers | Verifier is called synchronously and fails closed | Background job queue with bounded workers and timeouts |
 | Elevation of Privilege | Uploaded code escapes process sandbox | No execution in this server | Firecracker jailer, seccomp, cgroups, hardened guest |
@@ -58,4 +60,5 @@ The separate Firecracker runner must provide the actual execution boundary:
 
 - The synchronous verification flow is simple and auditable, but it is not ideal for high throughput.
 - Running `freshclam` on startup is optional because it may require network and host-level permissions.
+- Firecracker dry-run validates the API-to-runner handoff, but it does not execute the handler or enforce guest limits.
 - SQLite is acceptable for the requested scope; production should use a managed database with backups and row-level ownership checks.

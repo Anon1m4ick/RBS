@@ -2,7 +2,7 @@
 
 This directory contains Docker wrappers for each project component:
 
-- `cloud-server`: FastAPI upload and verification server;
+- `cloud-server`: FastAPI upload, verification, and optional Firecracker invoke server;
 - `cdk`: containerized CDK CLI used to authenticate, deploy, list, and delete functions;
 - `code-verifier`: static, LLM, and antivirus verifier package test container;
 - `firecracker-runner`: containerized Firecracker stage, useful for dry-runs without KVM.
@@ -42,7 +42,7 @@ The script performs:
 6. benign function deploy
 7. function list
 8. malicious function deploy, expected to fail
-9. invoke URL check, expected to return `501`
+9. invoke URL check twice; by default it returns `501` until Firecracker runtime is configured
 10. CDK delete
 
 ## Manual Commands
@@ -95,10 +95,10 @@ Call the generated invoke URL directly:
 ```powershell
 $headers = @{ Authorization = "Bearer dev-token" }
 $functions = @(Invoke-RestMethod -Headers $headers http://localhost:8000/functions)
-Invoke-RestMethod -Method Post -Headers $headers "http://localhost:8000/run/$($functions[0].id)"
+Invoke-RestMethod -Method Post -Headers $headers -Body '{"name":"Oblak"}' -ContentType "application/json" "http://localhost:8000/run/$($functions[0].id)"
 ```
 
-The invoke endpoint returns `501` because runtime execution is handled by the Firecracker stage and is intentionally outside the Cloud server scope.
+The invoke endpoint returns `501` until `OBLAK_RUNTIME_BACKEND=firecracker` is configured. With Firecracker enabled, each POST creates a separate invocation. Real execution requires Linux/KVM plus Firecracker kernel/rootfs artifacts; Docker Desktop can only validate dry-run handoff.
 
 Delete a function:
 

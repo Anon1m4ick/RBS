@@ -11,7 +11,7 @@ This service implements only the requested scope:
 - optional ClamAV scan for `requirements.txt`;
 - function listing and soft deletion for the existing CDK CLI;
 - audit events in SQLite and an append-only JSONL hash chain;
-- a generated invoke URL whose endpoint returns `501` because execution is outside this server's scope.
+- a generated invoke URL that can call the Firecracker runner stage when configured.
 
 ## Install
 
@@ -20,6 +20,7 @@ cd project/cloud-server
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e ..\code-verifier
+pip install -e ..\firecracker-runner
 pip install -e ".[dev]"
 ```
 
@@ -50,6 +51,15 @@ Useful server variables:
 | `OBLAK_BOOTSTRAP_USERNAME` | unset | Optional startup user |
 | `OBLAK_BOOTSTRAP_TOKEN` | unset | Optional startup API token |
 | `OBLAK_RUN_FRESHCLAM_ON_STARTUP` | `false` | Run `freshclam` on startup |
+| `OBLAK_RUNTIME_BACKEND` | `disabled` | Set to `firecracker` to enable `/run/{id}` execution |
+| `OBLAK_FIRECRACKER_DRY_RUN` | `false` | Prepare Firecracker payload without starting a VM |
+| `OBLAK_FIRECRACKER_BIN` | `firecracker` | Firecracker executable path |
+| `OBLAK_FIRECRACKER_KERNEL` | `/var/lib/oblak/firecracker/vmlinux` | Guest kernel image |
+| `OBLAK_FIRECRACKER_ROOTFS` | `/var/lib/oblak/firecracker/rootfs.ext4` | Guest rootfs image |
+| `OBLAK_FIRECRACKER_WORK_DIR` | `.oblak/firecracker-runs` | Firecracker run directory |
+| `OBLAK_FIRECRACKER_AUDIT_LOG_PATH` | `.oblak/audit/firecracker.jsonl` | Firecracker audit log |
+| `OBLAK_FIRECRACKER_TIMEOUT_SECONDS` | `10` | Invocation timeout |
+| `OBLAK_FIRECRACKER_MEMORY_MIB` | `128` | VM memory limit |
 
 Create a user:
 
@@ -100,7 +110,32 @@ Successful response:
 }
 ```
 
-`POST /run/{function_id}` is intentionally a placeholder and returns `501`.
+`POST /run/{function_id}` accepts a JSON event body. If `OBLAK_RUNTIME_BACKEND`
+is unset or `disabled`, the endpoint returns `501`. If set to `firecracker`, the
+server packages the verified function and invokes the Firecracker runner stage.
+
+In Docker Desktop/macOS, use `OBLAK_FIRECRACKER_DRY_RUN=true` only to verify the
+Cloud-to-Firecracker handoff. Real function execution requires a Linux host with
+KVM, a Firecracker binary, kernel image, and rootfs image.
+
+Example dev handoff mode in `cloud-server/.env`:
+
+```text
+OBLAK_RUNTIME_BACKEND=firecracker
+OBLAK_FIRECRACKER_DRY_RUN=true
+OBLAK_FIRECRACKER_WORK_DIR=/data/firecracker-runs
+OBLAK_FIRECRACKER_AUDIT_LOG_PATH=/data/firecracker-audit.jsonl
+```
+
+Invoke with an event:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Oblak"}' \
+  http://localhost:8000/run/<function_id>
+```
 
 ## Tests
 
