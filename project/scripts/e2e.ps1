@@ -67,10 +67,13 @@ if ($LASTEXITCODE -eq 0) {
     throw "malicious deploy unexpectedly passed"
 }
 
-Write-Host "Verifying invoke endpoint placeholder..."
-$invokeStatus = & curl.exe -sS -o NUL -w "%{http_code}" -X POST -H "Authorization: Bearer $Token" "http://localhost:8000/run/$functionId"
-if ($invokeStatus -ne "501") {
-    throw "expected invoke placeholder status 501, got $invokeStatus"
+Write-Host "Verifying invoke endpoint..."
+$invokeStatus1 = & curl.exe -sS -o NUL -w "%{http_code}" -X POST -H "Authorization: Bearer $Token" -H "Content-Type: application/json" -d '{"name":"first"}' "http://localhost:8000/run/$functionId"
+$invokeStatus2 = & curl.exe -sS -o NUL -w "%{http_code}" -X POST -H "Authorization: Bearer $Token" -H "Content-Type: application/json" -d '{"name":"second"}' "http://localhost:8000/run/$functionId"
+foreach ($invokeStatus in @($invokeStatus1, $invokeStatus2)) {
+    if ($invokeStatus -ne "501" -and $invokeStatus -ne "200") {
+        throw "expected invoke status 501 without runtime or 200 with runtime, got $invokeStatus"
+    }
 }
 
 Write-Host "Deleting function through CDK..."
