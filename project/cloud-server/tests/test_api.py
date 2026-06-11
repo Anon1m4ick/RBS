@@ -129,4 +129,52 @@ def test_invoke_url_is_placeholder_not_execution(tmp_path: Path, monkeypatch) ->
         response = client.post(f"/run/{created['function_id']}", headers=_auth())
 
     assert response.status_code == 501
-    assert "not implemented" in response.json()["detail"]
+    assert "OBLAK_RUNTIME_BACKEND=firecracker" in response.json()["detail"]
+
+
+def test_invoke_uses_firecracker_backend_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings(
+        database_path=tmp_path / "cloud.sqlite3",
+        audit_log_path=tmp_path / "audit.jsonl",
+        public_base_url="http://testserver",
+        bootstrap_username="alice",
+        bootstrap_token="secret-token",
+        runtime_backend="firecracker",
+        firecracker_dry_run=True,
+    )
+    app = create_app(settings)
+    monkeypatch.setattr("oblak_server.main.run_code_verifier", lambda path: {"ok": True})
+    calls: list[dict] = []
+
+    def fake_firecracker_run(**kwargs):
+        calls.append(kwargs)
+        return {
+            "status": "SUCCESS",
+            "duration_ms": 12,
+            "timed_out": False,
+            "run_dir": "/tmp/run",
+            "result": {
+                "status": "ok",
+                "return": {"message": f"hello {kwargs['event']['name']}"},
+            },
+        }
+
+    monkeypatch.setattr("oblak_server.main.run_firecracker_function", fake_firecracker_run)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/functions",
+            headers=_auth(),
+            files={"file": ("handler.py", b"def handle(event, context):\n    return event\n", "text/x-python")},
+        ).json()
+        first = client.post(f"/run/{created['function_id']}", headers=_auth(), json={"name": "Alice"})
+        second = client.post(f"/run/{created['function_id']}", headers=_auth(), json={"name": "Bob"})
+
+    assert first.status_code == 200
+    assert first.json()["runtime"] == "firecracker"
+    assert first.json()["status"] == "SUCCESS"
+    assert first.json()["result"]["return"] == {"message": "hello Alice"}
+    assert second.status_code == 200
+    assert second.json()["result"]["return"] == {"message": "hello Bob"}
+    assert len(calls) == 2
+    assert calls[0]["request_id"] != calls[1]["request_id"]

@@ -9,12 +9,13 @@ from pathlib import Path, PurePath
 from typing import Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 
 from oblak_server.audit import record_audit
 from oblak_server.config import Settings, load_settings
 from oblak_server.database import connect, find_user_by_token_hash, init_db, utc_now
+from oblak_server.firecracker_runtime import run_firecracker_function
 from oblak_server.security import hash_token
 from oblak_server.tools import run_freshclam, tool_status
 
@@ -378,39 +379,127 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=204)
 
     @app.post("/run/{function_id}")
-    def invoke_placeholder(
+    def invoke_function(
         function_id: str,
         request: Request,
+        event_body: Any = Body(default=None),
         user: dict[str, Any] = Depends(get_current_user),
-    ) -> dict[str, str]:
+    ) -> Response:
         settings = _settings(request)
         request_id = _request_id(request)
+        event = {} if event_body is None else event_body
         with connect(settings) as conn:
             row = conn.execute(
                 """
-                SELECT id, status FROM functions
-                WHERE id = ? AND deleted_at IS NULL
+                SELECT id, name, code, requirements, status FROM functions
+                WHERE id = ? AND user_id = ? AND deleted_at IS NULL
                 """,
-                (function_id,),
+                (function_id, user["id"]),
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Function not found")
+            if row["status"] != "VERIFIED":
+                record_audit(
+                    conn,
+                    settings,
+                    "function_invoke_rejected",
+                    outcome="failure",
+                    actor_user_id=user["id"],
+                    function_id=function_id,
+                    request_id=request_id,
+                    ip=_client_ip(request),
+                    details={"reason": "function is not verified", "status": row["status"]},
+                )
+                conn.commit()
+                raise HTTPException(status_code=409, detail=f"Function status is {row['status']}, expected VERIFIED")
+
+            function_row = dict(row)
+
+        if settings.runtime_backend != "firecracker":
+            with connect(settings) as conn:
+                record_audit(
+                    conn,
+                    settings,
+                    "function_invoke_requested",
+                    outcome="not_implemented",
+                    actor_user_id=user["id"],
+                    function_id=function_id,
+                    request_id=request_id,
+                    ip=_client_ip(request),
+                    details={"status": function_row["status"], "runtime_backend": settings.runtime_backend},
+                )
+                conn.commit()
+            raise HTTPException(
+                status_code=501,
+                detail="Function execution requires OBLAK_RUNTIME_BACKEND=firecracker",
+            )
+
+        try:
+            runtime_result = run_firecracker_function(
+                settings=settings,
+                function_id=function_id,
+                request_id=request_id,
+                filename=function_row["name"],
+                code=function_row["code"],
+                requirements=function_row["requirements"],
+                event=event,
+            )
+        except Exception as exc:
+            with connect(settings) as conn:
+                record_audit(
+                    conn,
+                    settings,
+                    "function_invoke_failed",
+                    outcome="failure",
+                    actor_user_id=user["id"],
+                    function_id=function_id,
+                    request_id=request_id,
+                    ip=_client_ip(request),
+                    details={"error_type": type(exc).__name__, "error": str(exc)},
+                )
+                conn.commit()
+            raise HTTPException(status_code=500, detail=f"Firecracker invocation failed: {exc}") from exc
+
+        runtime_status = str(runtime_result.get("status", "FAILED"))
+        response_status = {
+            "SUCCESS": 200,
+            "DRY_RUN": 200,
+            "FUNCTION_ERROR": 500,
+            "TIMEOUT": 504,
+            "FAILED": 502,
+        }.get(runtime_status, 502)
+
+        response_body = {
+            "function_id": function_id,
+            "request_id": request_id,
+            "runtime": "firecracker",
+            "status": runtime_status,
+            "result": runtime_result.get("result"),
+            "duration_ms": runtime_result.get("duration_ms"),
+            "timed_out": runtime_result.get("timed_out"),
+            "run_dir": runtime_result.get("run_dir"),
+        }
+
+        with connect(settings) as conn:
             record_audit(
                 conn,
                 settings,
-                "function_invoke_requested",
-                outcome="not_implemented",
+                "function_invoked",
+                outcome="success" if response_status == 200 else "failure",
                 actor_user_id=user["id"],
                 function_id=function_id,
                 request_id=request_id,
                 ip=_client_ip(request),
-                details={"status": row["status"]},
+                details={
+                    "runtime_backend": "firecracker",
+                    "runtime_status": runtime_status,
+                    "duration_ms": runtime_result.get("duration_ms"),
+                    "timed_out": runtime_result.get("timed_out"),
+                    "dry_run": settings.firecracker_dry_run,
+                },
             )
             conn.commit()
-        raise HTTPException(
-            status_code=501,
-            detail="Function execution is handled by the Firecracker runner stage and is not implemented here",
-        )
+        return JSONResponse(status_code=response_status, content=response_body)
 
     return app
 

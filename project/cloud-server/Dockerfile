@@ -9,15 +9,17 @@ RUN apt-get update \
         ca-certificates \
         clamav \
         clamav-freshclam \
+        e2fsprogs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY code-verifier ./code-verifier
+COPY firecracker-runner ./firecracker-runner
 COPY cloud-server ./cloud-server
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install -e ./code-verifier -e "./cloud-server[dev]"
+    && python -m pip install -e ./code-verifier -e ./firecracker-runner -e "./cloud-server[dev]"
 
 WORKDIR /app/cloud-server
 
